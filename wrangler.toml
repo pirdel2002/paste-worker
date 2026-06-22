@@ -1,4 +1,4 @@
-name = "pastebin-worker"
+name = "online-clipboard"
 main = "src/index.js"
 compatibility_date = "2025-04-24"
 
@@ -9,9 +9,10 @@ pattern = "paste.pirdel.ir"
 custom_domain = true
 
 [[kv_namespaces]]
-binding = "PASTES"
+binding = "CLIPS"
 id = "e5007944d8a54ec9878fad622f4fbc73"
 
 [vars]
-SITE_TITLE = "Pirdel Paste"
-DEFAULT_TTL = "604800"
+SITE_TITLE = "Pirdel Clipboard"
+DEFAULT_TTL = "600"
+MAX_TEXT_LENGTH = "50000"
