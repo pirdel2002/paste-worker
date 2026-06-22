@@ -22,11 +22,16 @@ export default {
         return html(env, "متن بزرگ است", `<main><h1>متن بیش از حد بزرگ است</h1><a href="/">بازگشت</a></main>`, 413);
       }
 
-      const ttl = Number(env.DEFAULT_TTL || 600);
+      const forever = form.get("forever") === "1";
+      const ttl = getTtl(form, env);
 
-      await env.CLIPS.put(room, text, {
-        expirationTtl: ttl,
-      });
+      if (forever) {
+        await env.CLIPS.put(room, text);
+      } else {
+        await env.CLIPS.put(room, text, {
+          expirationTtl: ttl,
+        });
+      }
 
       return Response.redirect(`${url.origin}/r/${room}`, 302);
     }
@@ -63,6 +68,21 @@ function homePage(env) {
             <label>متن برای کپی کردن</label>
             <textarea name="text" placeholder="متن را اینجا Paste کن..." autofocus></textarea>
 
+            <label>مدت نگهداری</label>
+            <div class="ttl-grid">
+              <input name="ttl" type="number" min="1" placeholder="خالی = ۱۰ دقیقه">
+              <select name="ttl_unit">
+                <option value="minutes">دقیقه</option>
+                <option value="hours">ساعت</option>
+                <option value="days">روز</option>
+              </select>
+            </div>
+
+            <label class="check">
+              <input type="checkbox" name="forever" value="1">
+              نگهداری دائمی
+            </label>
+
             <button type="submit">ذخیره و ساخت لینک</button>
           </form>
         </div>
@@ -97,7 +117,7 @@ function roomPage(room, text) {
       <section class="hero">
         <div class="badge">Room</div>
         <h1>کد اتاق: <code>${escapeHtml(room)}</code></h1>
-        <p class="hint">این متن بعد از حدود ۱۰ دقیقه حذف می‌شود.</p>
+        <p class="hint">اگر زمان نگهداری را خالی بگذاری، متن ۱۰ دقیقه می‌ماند.</p>
       </section>
 
       <form method="POST" action="/save" class="card">
@@ -105,6 +125,21 @@ function roomPage(room, text) {
 
         <label>متن</label>
         <textarea id="clipText" name="text" placeholder="متن را اینجا وارد کن...">${escapeHtml(text)}</textarea>
+
+        <label>مدت نگهداری</label>
+        <div class="ttl-grid">
+          <input name="ttl" type="number" min="1" placeholder="خالی = ۱۰ دقیقه">
+          <select name="ttl_unit">
+            <option value="minutes">دقیقه</option>
+            <option value="hours">ساعت</option>
+            <option value="days">روز</option>
+          </select>
+        </div>
+
+        <label class="check">
+          <input type="checkbox" name="forever" value="1">
+          نگهداری دائمی
+        </label>
 
         <div class="actions">
           <button type="submit">ذخیره / آپدیت</button>
@@ -232,7 +267,7 @@ function html(env, title, body, status = 200) {
       font-size: 14px;
     }
 
-    input, textarea {
+    input, textarea, select {
       width: 100%;
       border: 1px solid #334155;
       background: #020617;
@@ -244,7 +279,7 @@ function html(env, title, body, status = 200) {
       font-family: Vazirmatn, Tahoma, Arial, sans-serif;
     }
 
-    input:focus, textarea:focus {
+    input:focus, textarea:focus, select:focus {
       border-color: #60a5fa;
       box-shadow: 0 0 0 3px rgba(96, 165, 250, .15);
     }
@@ -274,6 +309,28 @@ function html(env, title, body, status = 200) {
     button:hover, a:hover {
       background: #1d4ed8;
       transform: translateY(-1px);
+    }
+
+    .ttl-grid {
+      display: grid;
+      grid-template-columns: 1fr 120px;
+      gap: 10px;
+    }
+
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 14px;
+      margin-bottom: 16px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .check input {
+      width: auto;
+      min-width: 18px;
+      height: 18px;
     }
 
     .actions {
@@ -316,7 +373,9 @@ function html(env, title, body, status = 200) {
         font-size: 28px;
       }
 
-      .row {
+      .row,
+      .ttl-grid {
+        grid-template-columns: 1fr;
         flex-direction: column;
       }
     }
@@ -330,6 +389,23 @@ function html(env, title, body, status = 200) {
       "cache-control": "no-store",
     },
   });
+}
+
+function getTtl(form, env) {
+  const defaultTtl = Number(env.DEFAULT_TTL || 600);
+  const raw = String(form.get("ttl") || "").trim();
+  const unit = String(form.get("ttl_unit") || "minutes");
+
+  if (!raw) return defaultTtl;
+
+  const value = Math.max(1, Number(raw));
+
+  if (!Number.isFinite(value)) return defaultTtl;
+
+  if (unit === "hours") return value * 60 * 60;
+  if (unit === "days") return value * 24 * 60 * 60;
+
+  return value * 60;
 }
 
 function randomRoom() {
