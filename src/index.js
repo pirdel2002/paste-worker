@@ -13,7 +13,7 @@ export default {
       code = code.replace(/[^a-z0-9_-]/g, "").slice(0, 32);
 
       if (!code) {
-        return html(env, "کد نامعتبر", `<main><h1>کد اشتراک نامعتبر است</h1><a href="/">بازگشت</a></main>`, 400);
+        return html(env, "کد نامعتبر", `<main><h1>شناسه اشتراک نامعتبر است</h1><a href="/">بازگشت</a></main>`, 400);
       }
 
       const maxLen = Number(env.MAX_TEXT_LENGTH || 50000);
@@ -45,7 +45,7 @@ export default {
     if (url.pathname.startsWith("/c/")) {
       const code = url.pathname.replace("/c/", "").trim().toLowerCase();
       const text = await env.CLIPS.get(code);
-      return html(env, `کد ${code}`, viewPage(code, text || ""));
+      return html(env, `شناسه ${code}`, viewPage(code, text || ""));
     }
 
     if (url.pathname.startsWith("/r/")) {
@@ -70,13 +70,13 @@ function landingPage(env) {
         <a class="choice-card" href="/new">
           <span>01</span>
           <h2>متن جدید بساز</h2>
-          <p>متن را ذخیره کن و با یک کد اشتراک روی دستگاه دیگر باز کن.</p>
+          <p>متن را ذخیره کن و با یک شناسه اشتراک روی دستگاه دیگر باز کن.</p>
         </a>
 
         <a class="choice-card" href="/open">
           <span>02</span>
           <h2>متن ذخیره‌شده را باز کن</h2>
-          <p>کد اشتراک را وارد کن، متن را ببین و سریع کپی کن.</p>
+          <p>شناسه اشتراک را وارد کن، متن را ببین و سریع کپی کن.</p>
         </a>
       </section>
     </main>
@@ -89,11 +89,11 @@ function newPage(env) {
       <section class="hero">
         <div class="badge">New Text</div>
         <h1>متن جدید</h1>
-        <p class="hint">کد اشتراک اختیاری است. اگر خالی بماند، یک کد تصادفی ساخته می‌شود.</p>
+        <p class="hint">شناسه اشتراک اختیاری است. اگر خالی بماند، یک شناسه تصادفی ساخته می‌شود.</p>
       </section>
 
       <form method="POST" action="/save" class="card">
-        <label>کد اشتراک</label>
+        <label>شناسه اشتراک</label>
         <input name="code" placeholder="اختیاری؛ مثل office یا 4821">
 
         <label>متن</label>
@@ -129,11 +129,11 @@ function openPage() {
       <section class="hero">
         <div class="badge">Open Text</div>
         <h1>مشاهده متن</h1>
-        <p class="hint">کد اشتراک را وارد کن تا متن ذخیره‌شده نمایش داده شود.</p>
+        <p class="hint">شناسه اشتراک را وارد کن تا متن ذخیره‌شده نمایش داده شود.</p>
       </section>
 
       <section class="card">
-        <label>کد اشتراک</label>
+        <label>شناسه اشتراک</label>
         <div class="row">
           <input id="openCode" placeholder="مثلاً 4821 یا office" autofocus>
           <button type="button" onclick="openCode()">باز کن</button>
@@ -158,12 +158,18 @@ function openPage() {
 }
 
 function viewPage(code, text) {
+  const safeLink = `/c/${escapeHtml(code)}`;
+
   return `
     <main>
       <section class="hero">
         <div class="badge">Shared Text</div>
-        <h1>کد اشتراک <code>${escapeHtml(code)}</code></h1>
-        <p class="hint">متن را کپی کن، QR بساز یا محتوای همین کد را به‌روزرسانی کن.</p>
+        <h1>شناسه اشتراک <code>${escapeHtml(code)}</code></h1>
+        <p class="hint">متن را کپی کن، لینک مستقیم بده یا QR لینک را نمایش بده.</p>
+
+        <div class="share-link">
+          <input id="shareUrl" type="text" readonly value="${safeLink}" onclick="this.select()">
+        </div>
       </section>
 
       <form method="POST" action="/save" class="card">
@@ -188,22 +194,31 @@ function viewPage(code, text) {
         </label>
 
         <div class="actions">
-          <button type="button" onclick="copyText()">کپی</button>
-          <button type="button" onclick="showQr()">نمایش QR</button>
+          <button type="button" onclick="copyText()">کپی متن</button>
+          <button type="button" onclick="copyLink()">کپی لینک</button>
+          <button type="button" onclick="shareLink()">اشتراک‌گذاری</button>
+          <button type="button" onclick="showQr()">QR لینک</button>
           <button type="submit">ذخیره تغییرات</button>
           <a href="/">صفحه اصلی</a>
         </div>
 
         <div id="qrBox" class="qr-box" hidden>
-          <p>QR متن</p>
-          <canvas id="qrCanvas"></canvas>
-          <small>برای متن‌های خیلی طولانی، QR ممکن است سخت اسکن شود.</small>
+          <p>QR لینک اشتراک</p>
+          <img id="qrImage" alt="QR Code">
+          <small>این QR لینک مستقیم همین متن را باز می‌کند.</small>
         </div>
       </form>
     </main>
 
     <script>
       const clipText = document.getElementById('clipText');
+      const shareUrlInput = document.getElementById('shareUrl');
+
+      function fullShareUrl() {
+        return window.location.origin + '${safeLink}';
+      }
+
+      shareUrlInput.value = fullShareUrl();
 
       function updateTextDirection() {
         const value = clipText.value.trim();
@@ -218,32 +233,35 @@ function viewPage(code, text) {
       async function copyText() {
         const text = clipText.value;
         await navigator.clipboard.writeText(text);
-        alert('کپی شد');
+        alert('متن کپی شد');
+      }
+
+      async function copyLink() {
+        await navigator.clipboard.writeText(fullShareUrl());
+        alert('لینک کپی شد');
+      }
+
+      async function shareLink() {
+        const url = fullShareUrl();
+
+        if (navigator.share) {
+          await navigator.share({
+            title: document.title,
+            url
+          });
+        } else {
+          await navigator.clipboard.writeText(url);
+          alert('لینک کپی شد');
+        }
       }
 
       function showQr() {
-        const text = clipText.value.trim();
-
-        if (!text) {
-          alert('متنی برای ساخت QR وجود ندارد');
-          return;
-        }
-
         const qrBox = document.getElementById('qrBox');
-        const canvas = document.getElementById('qrCanvas');
+        const qrImage = document.getElementById('qrImage');
+        const data = encodeURIComponent(fullShareUrl());
 
+        qrImage.src = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + data;
         qrBox.hidden = false;
-
-        if (!window.QRCode) {
-          alert('کتابخانه QR بارگذاری نشده است');
-          return;
-        }
-
-        QRCode.toCanvas(canvas, text, {
-          width: 260,
-          margin: 2,
-          errorCorrectionLevel: 'M'
-        });
       }
     </script>
   `;
@@ -256,7 +274,6 @@ function html(env, title, body, status = 200) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${escapeHtml(title)}</title>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 
   <style>
     @font-face {
@@ -470,6 +487,17 @@ function html(env, title, body, status = 200) {
       white-space: nowrap;
     }
 
+    .share-link {
+      max-width: 560px;
+      margin: 18px auto 0;
+    }
+
+    .share-link input {
+      text-align: left;
+      direction: ltr;
+      font-size: 13px;
+    }
+
     .qr-box {
       margin-top: 20px;
       padding: 18px;
@@ -479,11 +507,13 @@ function html(env, title, body, status = 200) {
       text-align: center;
     }
 
-    .qr-box canvas {
+    .qr-box img {
       margin-top: 12px;
       background: white;
       padding: 10px;
       border-radius: 14px;
+      max-width: 300px;
+      width: 100%;
     }
 
     .qr-box small {
