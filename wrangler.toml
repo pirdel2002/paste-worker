@@ -1,0 +1,17 @@
+name = "pastebin-worker"
+main = "src/index.js"
+compatibility_date = "2025-04-24"
+
+workers_dev = false
+
+[[routes]]
+pattern = "paste.pirdel.ir"
+custom_domain = true
+
+[[kv_namespaces]]
+binding = "PASTES"
+id = "e5007944d8a54ec9878fad622f4fbc73"
+
+[vars]
+SITE_TITLE = "Pirdel Paste"
+DEFAULT_TTL = "604800"
