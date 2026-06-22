@@ -28,103 +28,71 @@ export default {
       if (forever) {
         await env.CLIPS.put(room, text);
       } else {
-        await env.CLIPS.put(room, text, {
-          expirationTtl: ttl,
-        });
+        await env.CLIPS.put(room, text, { expirationTtl: ttl });
       }
 
       return Response.redirect(`${url.origin}/r/${room}`, 302);
     }
 
+    if (url.pathname === "/new") {
+      return html(env, "متن جدید", newPage(env));
+    }
+
+    if (url.pathname === "/open") {
+      return html(env, "مشاهده متن", openPage());
+    }
+
     if (url.pathname.startsWith("/r/")) {
       const room = url.pathname.replace("/r/", "").trim().toLowerCase();
       const text = await env.CLIPS.get(room);
-
       return html(env, `اتاق ${room}`, roomPage(room, text || ""));
     }
 
-    return html(env, env.SITE_TITLE || "Clipboard", homePage(env));
+    return html(env, env.SITE_TITLE || "Clipboard", landingPage(env));
   },
 };
 
-function homePage(env) {
+function landingPage(env) {
   return `
-    <main>
+    <main class="landing">
       <section class="hero">
         <div class="badge">Online Clipboard</div>
         <h1>${escapeHtml(env.SITE_TITLE || "Pirdel Clipboard")}</h1>
-        <p class="hint">می‌خواهی متن جدید برای کپی کردن بذاری یا می‌خواهی یک متن کپی‌شده را ببینی؟</p>
+        <p class="hint">انتقال سریع متن بین دستگاه‌ها، بدون ورود و بدون پیچیدگی.</p>
       </section>
 
-      <section class="cards">
-        <div class="card">
-          <h2>متن جدید می‌گذارم</h2>
-          <p>متن را اینجا وارد کن. اگر کد اتاق را خالی بگذاری، خودش یک کد تصادفی می‌سازد.</p>
+      <section class="choice-grid">
+        <a class="choice-card" href="/new">
+          <span>01</span>
+          <h2>متن جدید بگذار</h2>
+          <p>یک متن ذخیره کن و با کد اتاق روی دستگاه دیگر بازش کن.</p>
+        </a>
 
-          <form method="POST" action="/save">
-            <label>کد اتاق، اختیاری</label>
-            <input name="room" placeholder="مثلاً office یا 4821">
-
-            <label>متن برای کپی کردن</label>
-            <textarea name="text" placeholder="متن را اینجا Paste کن..." autofocus></textarea>
-
-            <label>مدت نگهداری</label>
-            <div class="ttl-grid">
-              <input name="ttl" type="number" min="1" placeholder="خالی = ۱۰ دقیقه">
-              <select name="ttl_unit">
-                <option value="minutes">دقیقه</option>
-                <option value="hours">ساعت</option>
-                <option value="days">روز</option>
-              </select>
-            </div>
-
-            <label class="check">
-              <input type="checkbox" name="forever" value="1">
-              نگهداری دائمی
-            </label>
-
-            <button type="submit">ذخیره و ساخت لینک</button>
-          </form>
-        </div>
-
-        <div class="card">
-          <h2>متن کپی‌شده را می‌بینم</h2>
-          <p>کد اتاق را وارد کن تا متن ذخیره‌شده را ببینی و کپی کنی.</p>
-
-          <div class="open-box">
-            <label>کد اتاق</label>
-            <div class="row">
-              <input id="openRoom" placeholder="مثلاً 4821 یا office">
-              <button type="button" onclick="openRoom()">باز کن</button>
-            </div>
-          </div>
-        </div>
+        <a class="choice-card" href="/open">
+          <span>02</span>
+          <h2>متن ذخیره‌شده را ببین</h2>
+          <p>کد اتاق را وارد کن و متن را سریع کپی کن.</p>
+        </a>
       </section>
     </main>
-
-    <script>
-      function openRoom() {
-        const room = document.getElementById('openRoom').value.trim();
-        if (room) location.href = '/r/' + encodeURIComponent(room);
-      }
-    </script>
   `;
 }
 
-function roomPage(room, text) {
+function newPage(env) {
   return `
     <main>
       <section class="hero">
-        <div class="badge">Room</div>
-        <h1>کد اتاق: <code>${escapeHtml(room)}</code></h1>
-        <p class="hint">اگر زمان نگهداری را خالی بگذاری، متن ۱۰ دقیقه می‌ماند.</p>
+        <div class="badge">New Text</div>
+        <h1>متن جدید</h1>
+        <p class="hint">کد اتاق اختیاری است. اگر خالی بماند، کد تصادفی ساخته می‌شود.</p>
       </section>
 
       <form method="POST" action="/save" class="card">
-        <input type="hidden" name="room" value="${escapeHtml(room)}">
+        <label>کد اتاق</label>
+        <input name="room" placeholder="اختیاری؛ مثل office یا 4821">
 
         <label>متن</label>
-        <textarea id="clipText" name="text" placeholder="متن را اینجا وارد کن...">${escapeHtml(text)}</textarea>
+        <textarea name="text" placeholder="متن را اینجا وارد کن..." autofocus></textarea>
 
         <label>مدت نگهداری</label>
         <div class="ttl-grid">
@@ -142,8 +110,81 @@ function roomPage(room, text) {
         </label>
 
         <div class="actions">
-          <button type="submit">ذخیره / آپدیت</button>
-          <button type="button" onclick="copyText()">کپی متن</button>
+          <button type="submit">ذخیره متن</button>
+          <a href="/">بازگشت</a>
+        </div>
+      </form>
+    </main>
+  `;
+}
+
+function openPage() {
+  return `
+    <main>
+      <section class="hero">
+        <div class="badge">Open Room</div>
+        <h1>مشاهده متن</h1>
+        <p class="hint">کد اتاق را وارد کن تا متن ذخیره‌شده نمایش داده شود.</p>
+      </section>
+
+      <section class="card">
+        <label>کد اتاق</label>
+        <div class="row">
+          <input id="openRoom" placeholder="مثلاً 4821 یا office" autofocus>
+          <button type="button" onclick="openRoom()">باز کن</button>
+        </div>
+        <div class="actions">
+          <a href="/">بازگشت</a>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      function openRoom() {
+        const room = document.getElementById('openRoom').value.trim();
+        if (room) location.href = '/r/' + encodeURIComponent(room);
+      }
+
+      document.getElementById('openRoom').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') openRoom();
+      });
+    </script>
+  `;
+}
+
+function roomPage(room, text) {
+  return `
+    <main>
+      <section class="hero">
+        <div class="badge">Room</div>
+        <h1>اتاق <code>${escapeHtml(room)}</code></h1>
+        <p class="hint">متن را کپی کن یا همان اتاق را به‌روزرسانی کن.</p>
+      </section>
+
+      <form method="POST" action="/save" class="card">
+        <input type="hidden" name="room" value="${escapeHtml(room)}">
+
+        <label>متن</label>
+        <textarea id="clipText" name="text" placeholder="متنی برای نمایش وجود ندارد.">${escapeHtml(text)}</textarea>
+
+        <label>مدت نگهداری جدید</label>
+        <div class="ttl-grid">
+          <input name="ttl" type="number" min="1" placeholder="خالی = ۱۰ دقیقه">
+          <select name="ttl_unit">
+            <option value="minutes">دقیقه</option>
+            <option value="hours">ساعت</option>
+            <option value="days">روز</option>
+          </select>
+        </div>
+
+        <label class="check">
+          <input type="checkbox" name="forever" value="1">
+          نگهداری دائمی
+        </label>
+
+        <div class="actions">
+          <button type="button" onclick="copyText()">کپی</button>
+          <button type="submit">ذخیره تغییرات</button>
           <a href="/">صفحه اصلی</a>
         </div>
       </form>
@@ -192,30 +233,38 @@ function html(env, title, body, status = 200) {
       margin: 0;
       min-height: 100vh;
       background:
-        radial-gradient(circle at top right, rgba(37, 99, 235, .25), transparent 35%),
+        radial-gradient(circle at top right, rgba(37, 99, 235, .22), transparent 34%),
+        radial-gradient(circle at bottom left, rgba(14, 165, 233, .12), transparent 36%),
         linear-gradient(135deg, #020617, #0f172a);
       color: #e5e7eb;
       font-family: Vazirmatn, Tahoma, Arial, sans-serif;
     }
 
     main {
-      max-width: 1050px;
+      max-width: 980px;
       margin: 0 auto;
-      padding: 48px 20px;
+      padding: 52px 20px;
+    }
+
+    .landing {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
     }
 
     .hero {
       text-align: center;
-      margin-bottom: 28px;
+      margin-bottom: 30px;
     }
 
     .badge {
       display: inline-block;
       margin-bottom: 14px;
       padding: 6px 12px;
-      border: 1px solid #334155;
+      border: 1px solid rgba(148, 163, 184, .25);
       border-radius: 999px;
-      background: rgba(15, 23, 42, .7);
+      background: rgba(15, 23, 42, .65);
       color: #93c5fd;
       font-size: 13px;
       direction: ltr;
@@ -223,14 +272,14 @@ function html(env, title, body, status = 200) {
 
     h1 {
       margin: 0 0 10px;
-      font-size: 34px;
+      font-size: 38px;
       font-weight: 700;
-      letter-spacing: -0.5px;
+      letter-spacing: -0.8px;
     }
 
     h2 {
-      margin: 0 0 8px;
-      font-size: 22px;
+      margin: 0 0 10px;
+      font-size: 23px;
       font-weight: 700;
     }
 
@@ -244,20 +293,41 @@ function html(env, title, body, status = 200) {
       font-size: 16px;
     }
 
-    .cards {
+    .choice-grid {
       display: grid;
-      grid-template-columns: 1.3fr .9fr;
+      grid-template-columns: 1fr 1fr;
       gap: 18px;
-      align-items: start;
     }
 
+    .choice-card,
     .card {
       border: 1px solid rgba(148, 163, 184, .22);
       background: rgba(15, 23, 42, .72);
       backdrop-filter: blur(16px);
-      border-radius: 22px;
-      padding: 22px;
-      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.24);
+    }
+
+    .choice-card {
+      color: #e5e7eb;
+      text-decoration: none;
+      min-height: 190px;
+      transition: transform .16s ease, border-color .16s ease, background .16s ease;
+    }
+
+    .choice-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(147, 197, 253, .6);
+      background: rgba(30, 41, 59, .78);
+    }
+
+    .choice-card span {
+      display: inline-block;
+      margin-bottom: 26px;
+      color: #93c5fd;
+      direction: ltr;
+      font-size: 14px;
     }
 
     label {
@@ -285,7 +355,7 @@ function html(env, title, body, status = 200) {
     }
 
     textarea {
-      min-height: 320px;
+      min-height: 340px;
       direction: ltr;
       resize: vertical;
       line-height: 1.8;
@@ -337,11 +407,7 @@ function html(env, title, body, status = 200) {
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
-      margin-top: 14px;
-    }
-
-    .open-box {
-      margin-top: 18px;
+      margin-top: 16px;
     }
 
     .row {
@@ -362,15 +428,15 @@ function html(env, title, body, status = 200) {
 
     @media (max-width: 780px) {
       main {
-        padding: 30px 14px;
+        padding: 34px 14px;
       }
 
-      .cards {
+      .choice-grid {
         grid-template-columns: 1fr;
       }
 
       h1 {
-        font-size: 28px;
+        font-size: 29px;
       }
 
       .row,
