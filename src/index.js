@@ -34,13 +34,8 @@ export default {
       return Response.redirect(`${url.origin}/c/${code}`, 302);
     }
 
-    if (url.pathname === "/new") {
-      return html(env, "متن جدید", newPage(env));
-    }
-
-    if (url.pathname === "/open") {
-      return html(env, "مشاهده متن", openPage());
-    }
+    if (url.pathname === "/new") return html(env, "متن جدید", newPage(env));
+    if (url.pathname === "/open") return html(env, "مشاهده متن", openPage());
 
     if (url.pathname.startsWith("/c/")) {
       const code = url.pathname.replace("/c/", "").trim().toLowerCase();
@@ -165,7 +160,7 @@ function viewPage(code, text) {
       <section class="hero">
         <div class="badge">Shared Text</div>
         <h1>شناسه اشتراک <code>${escapeHtml(code)}</code></h1>
-        <p class="hint">متن را کپی کن، لینک مستقیم بده یا QR لینک را نمایش بده.</p>
+        <p class="hint">متن را کپی کن، لینک مستقیم بده یا QR خود متن را بساز.</p>
 
         <div class="share-link">
           <input id="shareUrl" type="text" readonly value="${safeLink}" onclick="this.select()">
@@ -197,17 +192,22 @@ function viewPage(code, text) {
           <button type="button" onclick="copyText()">کپی متن</button>
           <button type="button" onclick="copyLink()">کپی لینک</button>
           <button type="button" onclick="shareLink()">اشتراک‌گذاری</button>
-          <button type="button" onclick="showQr()">QR لینک</button>
+          <button type="button" onclick="showQr()">QR متن</button>
           <button type="submit">ذخیره تغییرات</button>
           <a href="/">صفحه اصلی</a>
         </div>
-
-        <div id="qrBox" class="qr-box" hidden>
-          <p>QR لینک اشتراک</p>
-          <img id="qrImage" alt="QR Code">
-          <small>این QR لینک مستقیم همین متن را باز می‌کند.</small>
-        </div>
       </form>
+
+      <div id="qrModal" class="modal" hidden>
+        <div class="modal-backdrop" onclick="closeQr()"></div>
+        <div class="modal-card">
+          <button class="modal-close" type="button" onclick="closeQr()">×</button>
+          <h2>QR متن</h2>
+          <p class="modal-hint">این QR مستقیماً از محتوای متن ساخته می‌شود، نه از لینک صفحه.</p>
+          <img id="qrImage" alt="QR Code">
+          <small>برای متن‌های طولانی، QR ممکن است سخت اسکن شود.</small>
+        </div>
+      </div>
     </main>
 
     <script>
@@ -231,8 +231,7 @@ function viewPage(code, text) {
       clipText.addEventListener('input', updateTextDirection);
 
       async function copyText() {
-        const text = clipText.value;
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(clipText.value);
         alert('متن کپی شد');
       }
 
@@ -256,13 +255,35 @@ function viewPage(code, text) {
       }
 
       function showQr() {
-        const qrBox = document.getElementById('qrBox');
-        const qrImage = document.getElementById('qrImage');
-        const data = encodeURIComponent(fullShareUrl());
+        const text = clipText.value.trim();
 
-        qrImage.src = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + data;
-        qrBox.hidden = false;
+        if (!text) {
+          alert('متنی برای ساخت QR وجود ندارد');
+          return;
+        }
+
+        if (text.length > 1200) {
+          alert('متن برای QR خیلی طولانی است. بهتر است لینک را اشتراک‌گذاری کنی.');
+          return;
+        }
+
+        const qrModal = document.getElementById('qrModal');
+        const qrImage = document.getElementById('qrImage');
+        const data = encodeURIComponent(text);
+
+        qrImage.src = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + data;
+        qrModal.hidden = false;
+        document.body.classList.add('modal-open');
       }
+
+      function closeQr() {
+        document.getElementById('qrModal').hidden = true;
+        document.body.classList.remove('modal-open');
+      }
+
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeQr();
+      });
     </script>
   `;
 }
@@ -305,6 +326,10 @@ function html(env, title, body, status = 200) {
         linear-gradient(135deg, #020617, #0f172a);
       color: #e5e7eb;
       font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+    }
+
+    body.modal-open {
+      overflow: hidden;
     }
 
     main {
@@ -498,28 +523,69 @@ function html(env, title, body, status = 200) {
       font-size: 13px;
     }
 
-    .qr-box {
-      margin-top: 20px;
-      padding: 18px;
-      border: 1px solid rgba(148, 163, 184, .22);
-      background: rgba(2, 6, 23, .55);
-      border-radius: 18px;
+    .modal[hidden] {
+      display: none;
+    }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(2, 6, 23, .72);
+      backdrop-filter: blur(8px);
+    }
+
+    .modal-card {
+      position: relative;
+      width: min(420px, 100%);
+      border: 1px solid rgba(148, 163, 184, .24);
+      background: #0f172a;
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 30px 90px rgba(0,0,0,.45);
       text-align: center;
     }
 
-    .qr-box img {
-      margin-top: 12px;
+    .modal-card img {
+      margin-top: 16px;
       background: white;
-      padding: 10px;
-      border-radius: 14px;
-      max-width: 300px;
+      padding: 12px;
+      border-radius: 16px;
+      max-width: 320px;
       width: 100%;
     }
 
-    .qr-box small {
+    .modal-card small {
       display: block;
-      margin-top: 10px;
+      margin-top: 12px;
       color: #94a3b8;
+      line-height: 1.9;
+    }
+
+    .modal-hint {
+      color: #cbd5e1;
+      font-size: 14px;
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border-radius: 50%;
+      font-size: 24px;
+      line-height: 1;
+      background: #1e293b;
     }
 
     code {
