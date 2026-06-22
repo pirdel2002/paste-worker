@@ -5,15 +5,15 @@ export default {
     if (request.method === "POST" && url.pathname === "/save") {
       const form = await request.formData();
 
-      let room = String(form.get("room") || "").trim().toLowerCase();
+      let code = String(form.get("code") || "").trim().toLowerCase();
       const text = String(form.get("text") || "");
 
-      if (!room) room = randomRoom();
+      if (!code) code = randomCode();
 
-      room = room.replace(/[^a-z0-9_-]/g, "").slice(0, 32);
+      code = code.replace(/[^a-z0-9_-]/g, "").slice(0, 32);
 
-      if (!room) {
-        return html(env, "کد نامعتبر", `<main><h1>کد اتاق نامعتبر است</h1><a href="/">بازگشت</a></main>`, 400);
+      if (!code) {
+        return html(env, "کد نامعتبر", `<main><h1>کد اشتراک نامعتبر است</h1><a href="/">بازگشت</a></main>`, 400);
       }
 
       const maxLen = Number(env.MAX_TEXT_LENGTH || 50000);
@@ -26,12 +26,12 @@ export default {
       const ttl = getTtl(form, env);
 
       if (forever) {
-        await env.CLIPS.put(room, text);
+        await env.CLIPS.put(code, text);
       } else {
-        await env.CLIPS.put(room, text, { expirationTtl: ttl });
+        await env.CLIPS.put(code, text, { expirationTtl: ttl });
       }
 
-      return Response.redirect(`${url.origin}/r/${room}`, 302);
+      return Response.redirect(`${url.origin}/c/${code}`, 302);
     }
 
     if (url.pathname === "/new") {
@@ -42,10 +42,15 @@ export default {
       return html(env, "مشاهده متن", openPage());
     }
 
+    if (url.pathname.startsWith("/c/")) {
+      const code = url.pathname.replace("/c/", "").trim().toLowerCase();
+      const text = await env.CLIPS.get(code);
+      return html(env, `کد ${code}`, viewPage(code, text || ""));
+    }
+
     if (url.pathname.startsWith("/r/")) {
-      const room = url.pathname.replace("/r/", "").trim().toLowerCase();
-      const text = await env.CLIPS.get(room);
-      return html(env, `اتاق ${room}`, roomPage(room, text || ""));
+      const code = url.pathname.replace("/r/", "").trim().toLowerCase();
+      return Response.redirect(`${url.origin}/c/${code}`, 301);
     }
 
     return html(env, env.SITE_TITLE || "Clipboard", landingPage(env));
@@ -58,20 +63,20 @@ function landingPage(env) {
       <section class="hero">
         <div class="badge">Online Clipboard</div>
         <h1>${escapeHtml(env.SITE_TITLE || "Pirdel Clipboard")}</h1>
-        <p class="hint">انتقال سریع متن بین دستگاه‌ها، بدون ورود و بدون پیچیدگی.</p>
+        <p class="hint">انتقال سریع متن بین موبایل، لپ‌تاپ و هر دستگاه دیگر.</p>
       </section>
 
       <section class="choice-grid">
         <a class="choice-card" href="/new">
           <span>01</span>
-          <h2>متن جدید بگذار</h2>
-          <p>یک متن ذخیره کن و با کد اتاق روی دستگاه دیگر بازش کن.</p>
+          <h2>متن جدید بساز</h2>
+          <p>متن را ذخیره کن و با یک کد اشتراک روی دستگاه دیگر باز کن.</p>
         </a>
 
         <a class="choice-card" href="/open">
           <span>02</span>
-          <h2>متن ذخیره‌شده را ببین</h2>
-          <p>کد اتاق را وارد کن و متن را سریع کپی کن.</p>
+          <h2>متن ذخیره‌شده را باز کن</h2>
+          <p>کد اشتراک را وارد کن، متن را ببین و سریع کپی کن.</p>
         </a>
       </section>
     </main>
@@ -84,15 +89,15 @@ function newPage(env) {
       <section class="hero">
         <div class="badge">New Text</div>
         <h1>متن جدید</h1>
-        <p class="hint">کد اتاق اختیاری است. اگر خالی بماند، کد تصادفی ساخته می‌شود.</p>
+        <p class="hint">کد اشتراک اختیاری است. اگر خالی بماند، یک کد تصادفی ساخته می‌شود.</p>
       </section>
 
       <form method="POST" action="/save" class="card">
-        <label>کد اتاق</label>
-        <input name="room" placeholder="اختیاری؛ مثل office یا 4821">
+        <label>کد اشتراک</label>
+        <input name="code" placeholder="اختیاری؛ مثل office یا 4821">
 
         <label>متن</label>
-        <textarea name="text" placeholder="متن را اینجا وارد کن..." autofocus></textarea>
+        <textarea name="text" dir="auto" placeholder="متن را اینجا وارد کن..." autofocus></textarea>
 
         <label>مدت نگهداری</label>
         <div class="ttl-grid">
@@ -122,16 +127,16 @@ function openPage() {
   return `
     <main>
       <section class="hero">
-        <div class="badge">Open Room</div>
+        <div class="badge">Open Text</div>
         <h1>مشاهده متن</h1>
-        <p class="hint">کد اتاق را وارد کن تا متن ذخیره‌شده نمایش داده شود.</p>
+        <p class="hint">کد اشتراک را وارد کن تا متن ذخیره‌شده نمایش داده شود.</p>
       </section>
 
       <section class="card">
-        <label>کد اتاق</label>
+        <label>کد اشتراک</label>
         <div class="row">
-          <input id="openRoom" placeholder="مثلاً 4821 یا office" autofocus>
-          <button type="button" onclick="openRoom()">باز کن</button>
+          <input id="openCode" placeholder="مثلاً 4821 یا office" autofocus>
+          <button type="button" onclick="openCode()">باز کن</button>
         </div>
         <div class="actions">
           <a href="/">بازگشت</a>
@@ -140,32 +145,32 @@ function openPage() {
     </main>
 
     <script>
-      function openRoom() {
-        const room = document.getElementById('openRoom').value.trim();
-        if (room) location.href = '/r/' + encodeURIComponent(room);
+      function openCode() {
+        const code = document.getElementById('openCode').value.trim();
+        if (code) location.href = '/c/' + encodeURIComponent(code);
       }
 
-      document.getElementById('openRoom').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') openRoom();
+      document.getElementById('openCode').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') openCode();
       });
     </script>
   `;
 }
 
-function roomPage(room, text) {
+function viewPage(code, text) {
   return `
     <main>
       <section class="hero">
-        <div class="badge">Room</div>
-        <h1>اتاق <code>${escapeHtml(room)}</code></h1>
-        <p class="hint">متن را کپی کن یا همان اتاق را به‌روزرسانی کن.</p>
+        <div class="badge">Shared Text</div>
+        <h1>کد اشتراک <code>${escapeHtml(code)}</code></h1>
+        <p class="hint">متن را کپی کن، QR بساز یا محتوای همین کد را به‌روزرسانی کن.</p>
       </section>
 
       <form method="POST" action="/save" class="card">
-        <input type="hidden" name="room" value="${escapeHtml(room)}">
+        <input type="hidden" name="code" value="${escapeHtml(code)}">
 
         <label>متن</label>
-        <textarea id="clipText" name="text" placeholder="متنی برای نمایش وجود ندارد.">${escapeHtml(text)}</textarea>
+        <textarea id="clipText" name="text" dir="auto" placeholder="متنی برای نمایش وجود ندارد.">${escapeHtml(text)}</textarea>
 
         <label>مدت نگهداری جدید</label>
         <div class="ttl-grid">
@@ -184,17 +189,61 @@ function roomPage(room, text) {
 
         <div class="actions">
           <button type="button" onclick="copyText()">کپی</button>
+          <button type="button" onclick="showQr()">نمایش QR</button>
           <button type="submit">ذخیره تغییرات</button>
           <a href="/">صفحه اصلی</a>
+        </div>
+
+        <div id="qrBox" class="qr-box" hidden>
+          <p>QR متن</p>
+          <canvas id="qrCanvas"></canvas>
+          <small>برای متن‌های خیلی طولانی، QR ممکن است سخت اسکن شود.</small>
         </div>
       </form>
     </main>
 
     <script>
+      const clipText = document.getElementById('clipText');
+
+      function updateTextDirection() {
+        const value = clipText.value.trim();
+        const hasPersian = /[\\u0600-\\u06FF]/.test(value);
+        clipText.dir = hasPersian ? 'rtl' : 'ltr';
+        clipText.style.textAlign = hasPersian ? 'right' : 'left';
+      }
+
+      updateTextDirection();
+      clipText.addEventListener('input', updateTextDirection);
+
       async function copyText() {
-        const text = document.getElementById('clipText').value;
+        const text = clipText.value;
         await navigator.clipboard.writeText(text);
         alert('کپی شد');
+      }
+
+      function showQr() {
+        const text = clipText.value.trim();
+
+        if (!text) {
+          alert('متنی برای ساخت QR وجود ندارد');
+          return;
+        }
+
+        const qrBox = document.getElementById('qrBox');
+        const canvas = document.getElementById('qrCanvas');
+
+        qrBox.hidden = false;
+
+        if (!window.QRCode) {
+          alert('کتابخانه QR بارگذاری نشده است');
+          return;
+        }
+
+        QRCode.toCanvas(canvas, text, {
+          width: 260,
+          margin: 2,
+          errorCorrectionLevel: 'M'
+        });
       }
     </script>
   `;
@@ -207,6 +256,7 @@ function html(env, title, body, status = 200) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${escapeHtml(title)}</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 
   <style>
     @font-face {
@@ -356,10 +406,11 @@ function html(env, title, body, status = 200) {
 
     textarea {
       min-height: 340px;
-      direction: ltr;
+      direction: auto;
       resize: vertical;
-      line-height: 1.8;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      line-height: 1.9;
+      font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+      text-align: start;
     }
 
     button, a {
@@ -419,6 +470,28 @@ function html(env, title, body, status = 200) {
       white-space: nowrap;
     }
 
+    .qr-box {
+      margin-top: 20px;
+      padding: 18px;
+      border: 1px solid rgba(148, 163, 184, .22);
+      background: rgba(2, 6, 23, .55);
+      border-radius: 18px;
+      text-align: center;
+    }
+
+    .qr-box canvas {
+      margin-top: 12px;
+      background: white;
+      padding: 10px;
+      border-radius: 14px;
+    }
+
+    .qr-box small {
+      display: block;
+      margin-top: 10px;
+      color: #94a3b8;
+    }
+
     code {
       direction: ltr;
       display: inline-block;
@@ -474,7 +547,7 @@ function getTtl(form, env) {
   return value * 60;
 }
 
-function randomRoom() {
+function randomCode() {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
