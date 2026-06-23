@@ -1,4 +1,4 @@
-name = "online-clipboard"
+name = "paste-worker"
 main = "src/index.js"
 compatibility_date = "2025-04-24"
 
