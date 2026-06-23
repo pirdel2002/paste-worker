@@ -2,46 +2,34 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (url.pathname === "/manifest.webmanifest") return manifest(env);
-    if (url.pathname === "/sw.js") return serviceWorker();
-
     if (request.method === "POST" && url.pathname === "/save") {
       const form = await request.formData();
+
       let code = cleanCode(form.get("code") || randomCode());
-      const text = String(form.get("text") || "");
+      const text = String(form.get("text") || "").trim();
       const password = String(form.get("password") || "");
-      const oldPassword = String(form.get("old_password") || "");
 
       if (!code) return page(env, "خطا", errorPage("شناسه نامعتبر است"), 400);
-
-      const maxLen = Number(env.MAX_TEXT_LENGTH || 50000);
-      if (text.length > maxLen) return page(env, "خطا", errorPage("متن بیش از حد بزرگ است"), 413);
+      if (!text) return page(env, "خطا", errorPage("متن خالی قابل ذخیره نیست."), 400);
 
       const existing = await getClip(env, code);
-
-      if (existing?.passwordHash) {
-        const ok = await verifyPassword(oldPassword || password, existing.passwordHash);
-        if (!ok) return page(env, "رمز لازم است", errorPage("برای تغییر این متن، رمز صحیح لازم است."), 403);
+      if (existing) {
+        return page(env, "خطا", errorPage("این شناسه قبلاً استفاده شده است. شناسه دیگری انتخاب کن."), 409);
       }
 
-      if (existing?.readonly && !existing?.passwordHash) {
-        return page(env, "فقط خواندنی", errorPage("این متن فقط‌خواندنی است و قابل تغییر نیست."), 403);
-      }
+      const maxLen = Number(env.MAX_TEXT_LENGTH || 50000);
+      if (text.length > maxLen) return page(env, "خطا", errorPage("متن بیش از حد بزرگ است."), 413);
 
       const forever = form.get("forever") === "1";
       const ttl = getTtl(form, env);
       const now = Date.now();
 
       const item = {
-        v: 2,
+        v: 3,
         text,
-        createdAt: existing?.createdAt || now,
-        updatedAt: now,
+        createdAt: now,
         expiresAt: forever ? null : now + ttl * 1000,
-        passwordHash: password ? await sha256(password) : existing?.passwordHash || null,
-        readonly: form.get("readonly") === "1",
-        burnAfterRead: form.get("burn_after_read") === "1",
-        encrypted: form.get("encrypted") === "1"
+        passwordHash: password ? await sha256(password) : null,
       };
 
       const options = forever ? undefined : { expirationTtl: ttl };
@@ -50,21 +38,16 @@ export default {
       return Response.redirect(`${url.origin}/c/${code}`, 302);
     }
 
-    if (request.method === "POST" && url.pathname === "/delete") {
+    if (request.method === "POST" && url.pathname === "/admin/delete") {
+      const auth = checkAdmin(request, env);
+      if (!auth.ok) return auth.response;
+
       const form = await request.formData();
       const code = cleanCode(form.get("code") || "");
-      const password = String(form.get("password") || "");
-      const item = await getClip(env, code);
 
-      if (!item) return page(env, "حذف شد", errorPage("متنی با این شناسه وجود ندارد."), 404);
+      if (code) await env.CLIPS.delete(code);
 
-      if (item.passwordHash) {
-        const ok = await verifyPassword(password, item.passwordHash);
-        if (!ok) return page(env, "خطا", errorPage("رمز حذف اشتباه است."), 403);
-      }
-
-      await env.CLIPS.delete(code);
-      return page(env, "حذف شد", successPage("متن حذف شد."));
+      return Response.redirect(`${url.origin}/admin`, 302);
     }
 
     if (url.pathname === "/api/get") {
@@ -79,14 +62,13 @@ export default {
         if (!ok) return json({ ok: false, error: "password_required" }, 403);
       }
 
-      if (item.burnAfterRead) await env.CLIPS.delete(code);
+      return json({ ok: true, text: item.text || "" });
+    }
 
-      return json({
-        ok: true,
-        text: item.text || "",
-        encrypted: !!item.encrypted,
-        burnAfterRead: !!item.burnAfterRead
-      });
+    if (url.pathname === "/admin") {
+      const auth = checkAdmin(request, env);
+      if (!auth.ok) return auth.response;
+      return page(env, "مدیریت", await adminPage(env));
     }
 
     if (url.pathname === "/new") return page(env, "متن جدید", newPage(env));
@@ -95,7 +77,6 @@ export default {
     if (url.pathname.startsWith("/c/")) {
       const code = cleanCode(url.pathname.replace("/c/", ""));
       const item = await getClip(env, code);
-
       return page(env, `شناسه ${code}`, viewPage(code, item));
     }
 
@@ -116,13 +97,13 @@ function landingPage(env) {
         <a class="choice-card" href="/new">
           <span>01</span>
           <h2>متن جدید بساز</h2>
-          <p>متن را ذخیره کن و با یک شناسه اشتراک روی دستگاه دیگر باز کن.</p>
+          <p>یک متن ذخیره کن و با شناسه اشتراک روی دستگاه دیگر باز کن.</p>
         </a>
 
         <a class="choice-card" href="/open">
           <span>02</span>
           <h2>متن ذخیره‌شده را باز کن</h2>
-          <p>شناسه اشتراک را وارد کن، متن را ببین و سریع کپی کن.</p>
+          <p>شناسه اشتراک را وارد کن و متن را ببین.</p>
         </a>
       </section>
     </main>
@@ -135,17 +116,15 @@ function newPage(env) {
       <section class="hero">
         <div class="badge">New Text</div>
         <h1>متن جدید</h1>
-        <p class="hint">شناسه را خودت وارد کن یا خالی بگذار تا تصادفی ساخته شود.</p>
+        <p class="hint">شناسه اختیاری است. اگر خالی بماند، یک شناسه تصادفی ساخته می‌شود.</p>
       </section>
 
-      <form id="saveForm" method="POST" action="/save" class="card">
-        <input type="hidden" name="encrypted" id="encrypted" value="0">
-
+      <form method="POST" action="/save" class="card">
         <label>شناسه اشتراک</label>
         <input name="code" placeholder="اختیاری؛ مثل office یا 4821">
 
         <label>متن</label>
-        <textarea id="clipText" name="text" dir="auto" placeholder="متن را اینجا وارد کن..." autofocus></textarea>
+        <textarea id="clipText" name="text" dir="auto" placeholder="متن را اینجا وارد کن..." autofocus required></textarea>
 
         <label>مدت نگهداری</label>
         <div class="ttl-grid">
@@ -157,15 +136,13 @@ function newPage(env) {
           </select>
         </div>
 
-        <label class="check"><input type="checkbox" name="forever" value="1"> نگهداری دائمی</label>
-        <label class="check"><input type="checkbox" name="readonly" value="1"> فقط‌خواندنی</label>
-        <label class="check"><input type="checkbox" name="burn_after_read" value="1"> حذف بعد از اولین مشاهده</label>
+        <label class="check">
+          <input type="checkbox" name="forever" value="1">
+          نگهداری دائمی
+        </label>
 
-        <label>رمز اختیاری</label>
-        <input name="password" type="password" placeholder="برای محدود کردن مشاهده/حذف/ویرایش">
-
-        <label class="check"><input type="checkbox" id="useEncryption"> رمزنگاری سمت مرورگر</label>
-        <input id="encryptionPassword" type="password" placeholder="رمز رمزنگاری؛ روی سرور ذخیره نمی‌شود">
+        <label>رمز مشاهده، اختیاری</label>
+        <input name="password" type="password" placeholder="اگر وارد شود، مشاهده متن نیاز به رمز دارد">
 
         <div class="actions">
           <button type="submit">ذخیره متن</button>
@@ -194,11 +171,6 @@ function openPage() {
           <button type="button" onclick="openCode()">باز کن</button>
         </div>
 
-        <div class="local-history">
-          <h2>آخرین شناسه‌ها</h2>
-          <div id="historyList"></div>
-        </div>
-
         <div class="actions">
           <a href="/">بازگشت</a>
         </div>
@@ -214,98 +186,68 @@ function openPage() {
       document.getElementById('openCode').addEventListener('keydown', e => {
         if (e.key === 'Enter') openCode();
       });
-
-      const list = JSON.parse(localStorage.getItem('clip_history') || '[]');
-      document.getElementById('historyList').innerHTML = list.length
-        ? list.map(x => '<a href="/c/' + encodeURIComponent(x) + '">' + x + '</a>').join('')
-        : '<p class="muted">هنوز چیزی ثبت نشده.</p>';
     </script>
   `;
 }
 
 function viewPage(code, item) {
-  const exists = !!item;
-  const meta = {
-    code,
-    exists,
-    protected: !!item?.passwordHash,
-    readonly: !!item?.readonly,
-    burnAfterRead: !!item?.burnAfterRead,
-    encrypted: !!item?.encrypted,
-    expiresAt: item?.expiresAt || null
-  };
+  if (!item) {
+    return `
+      <main>
+        <section class="card">
+          <h1>متن پیدا نشد</h1>
+          <p class="hint">این شناسه وجود ندارد یا منقضی شده است.</p>
+          <div class="actions">
+            <a href="/">صفحه اصلی</a>
+          </div>
+        </section>
+      </main>
+    `;
+  }
+
+  const protectedText = !!item.passwordHash;
 
   return `
     <main>
       <section class="hero">
         <div class="badge">Shared Text</div>
         <h1>شناسه <code>${e(code)}</code></h1>
-        <p class="hint">${exists ? "متن را کپی کن، QR بساز یا لینک را به اشتراک بگذار." : "متنی با این شناسه پیدا نشد."}</p>
+        <p class="hint">متن فقط قابل مشاهده و کپی است. امکان تغییر بعد از ذخیره بسته شده است.</p>
 
-        <div class="share-link">
+        <div class="share-row">
           <input id="shareUrl" type="text" readonly onclick="this.select()">
+          <button class="icon-btn" type="button" title="کپی لینک" onclick="copyLink()">⧉</button>
         </div>
 
         <div id="remain" class="remain"></div>
       </section>
 
       <section class="card">
-        <div id="passwordBox" hidden>
-          <label>رمز مشاهده</label>
-          <div class="row">
-            <input id="viewPassword" type="password" placeholder="رمز را وارد کن">
-            <button type="button" onclick="loadText()">نمایش</button>
+        ${protectedText ? `
+          <div id="passwordBox">
+            <label>رمز مشاهده</label>
+            <div class="row">
+              <input id="viewPassword" type="password" placeholder="رمز را وارد کن">
+              <button type="button" onclick="loadText()">نمایش</button>
+            </div>
+          </div>
+        ` : ""}
+
+        <label>متن</label>
+
+        <div class="text-shell">
+          <textarea id="clipText" readonly dir="auto" placeholder="متنی برای نمایش وجود ندارد.">${protectedText ? "" : e(item.text)}</textarea>
+
+          <div class="side-icons">
+            <button type="button" class="icon-btn" title="کپی متن" onclick="copyText()">⧉</button>
+            <button type="button" class="icon-btn" title="اشتراک‌گذاری" onclick="shareLink()">↗</button>
+            <button type="button" class="icon-btn" title="QR متن" onclick="showQr()">▣</button>
           </div>
         </div>
 
-        <div id="decryptBox" hidden>
-          <label>رمز رمزگشایی</label>
-          <div class="row">
-            <input id="decryptPassword" type="password" placeholder="رمز رمزنگاری سمت مرورگر">
-            <button type="button" onclick="decryptCurrentText()">رمزگشایی</button>
-          </div>
+        <div class="actions">
+          <a href="/">صفحه اصلی</a>
         </div>
-
-        <form id="saveForm" method="POST" action="/save">
-          <input type="hidden" name="code" value="${e(code)}">
-          <input type="hidden" name="encrypted" id="encrypted" value="0">
-
-          <label>متن</label>
-          <textarea id="clipText" name="text" dir="auto" ${item?.readonly ? "readonly" : ""} placeholder="متنی برای نمایش وجود ندارد."></textarea>
-
-          <label>مدت نگهداری جدید</label>
-          <div class="ttl-grid">
-            <input name="ttl" type="number" min="1" placeholder="خالی = ۱۰ دقیقه">
-            <select name="ttl_unit">
-              <option value="minutes">دقیقه</option>
-              <option value="hours">ساعت</option>
-              <option value="days">روز</option>
-            </select>
-          </div>
-
-          <label class="check"><input type="checkbox" name="forever" value="1"> نگهداری دائمی</label>
-          <label class="check"><input type="checkbox" name="readonly" value="1" ${item?.readonly ? "checked" : ""}> فقط‌خواندنی</label>
-          <label class="check"><input type="checkbox" name="burn_after_read" value="1" ${item?.burnAfterRead ? "checked" : ""}> حذف بعد از اولین مشاهده</label>
-
-          <label>رمز مدیریت / تغییر</label>
-          <input name="old_password" type="password" placeholder="اگر رمز دارد، برای تغییر وارد کن">
-
-          <div class="actions">
-            <button type="button" onclick="copyText()">کپی متن</button>
-            <button type="button" onclick="copyCode()">کپی شناسه</button>
-            <button type="button" onclick="copyLink()">کپی لینک</button>
-            <button type="button" onclick="shareLink()">اشتراک‌گذاری</button>
-            <button type="button" onclick="showQr()">QR متن</button>
-            ${item?.readonly ? "" : `<button type="submit">ذخیره تغییرات</button>`}
-            <button type="button" class="danger" onclick="deleteClip()">حذف</button>
-            <a href="/">صفحه اصلی</a>
-          </div>
-        </form>
-
-        <label class="check auto-copy">
-          <input type="checkbox" id="autoCopyToggle">
-          کپی خودکار بعد از نمایش متن
-        </label>
       </section>
 
       <div id="qrModal" class="modal" hidden>
@@ -313,46 +255,35 @@ function viewPage(code, item) {
         <div class="modal-card">
           <button class="modal-close" type="button" onclick="closeQr()">×</button>
           <h2>QR متن</h2>
-          <p class="modal-hint">این QR از خود متن ساخته می‌شود، نه از لینک.</p>
+          <p class="modal-hint">این QR از خود متن ساخته می‌شود.</p>
           <img id="qrImage" alt="QR Code">
           <small>برای متن‌های طولانی، QR ممکن است سخت اسکن شود.</small>
         </div>
       </div>
 
-      ${sharedScripts()}
-
       <script>
-        const META = ${JSON.stringify(meta)};
+        const CODE = ${JSON.stringify(code)};
+        const EXPIRES_AT = ${JSON.stringify(item.expiresAt || null)};
+        const PROTECTED = ${JSON.stringify(protectedText)};
         const clipText = document.getElementById('clipText');
         const shareUrlInput = document.getElementById('shareUrl');
-        const autoCopyToggle = document.getElementById('autoCopyToggle');
 
         function fullShareUrl() {
-          return window.location.origin + '/c/' + encodeURIComponent(META.code);
+          return window.location.origin + '/c/' + encodeURIComponent(CODE);
         }
 
         shareUrlInput.value = fullShareUrl();
 
-        saveHistory(META.code);
+        updateTextDirection(clipText);
+        startCountdown(EXPIRES_AT);
 
-        autoCopyToggle.checked = localStorage.getItem('clip_auto_copy') === '1';
-        autoCopyToggle.addEventListener('change', () => {
-          localStorage.setItem('clip_auto_copy', autoCopyToggle.checked ? '1' : '0');
-        });
-
-        if (!META.exists) {
-          clipText.value = '';
-        } else if (META.protected) {
-          document.getElementById('passwordBox').hidden = false;
-        } else {
-          loadText();
+        if (!PROTECTED) {
+          updateTextDirection(clipText);
         }
-
-        startCountdown(META.expiresAt);
 
         async function loadText() {
           const password = document.getElementById('viewPassword')?.value || '';
-          const res = await fetch('/api/get?code=' + encodeURIComponent(META.code) + '&password=' + encodeURIComponent(password));
+          const res = await fetch('/api/get?code=' + encodeURIComponent(CODE) + '&password=' + encodeURIComponent(password));
           const data = await res.json();
 
           if (!data.ok) {
@@ -362,40 +293,13 @@ function viewPage(code, item) {
 
           clipText.value = data.text || '';
           updateTextDirection(clipText);
-
-          if (data.encrypted) {
-            document.getElementById('decryptBox').hidden = false;
-          } else if (autoCopyToggle.checked) {
-            await copyText();
-          }
-
-          if (data.burnAfterRead) {
-            alert('این متن بعد از این مشاهده حذف شد.');
-          }
-        }
-
-        async function decryptCurrentText() {
-          const pass = document.getElementById('decryptPassword').value;
-          if (!pass) return alert('رمز رمزگشایی را وارد کن');
-
-          try {
-            clipText.value = await decryptText(clipText.value, pass);
-            updateTextDirection(clipText);
-            document.getElementById('decryptBox').hidden = true;
-            if (autoCopyToggle.checked) await copyText();
-          } catch {
-            alert('رمزگشایی ناموفق بود');
-          }
+          document.getElementById('passwordBox').hidden = true;
         }
 
         async function copyText() {
+          if (!clipText.value.trim()) return alert('متنی برای کپی وجود ندارد');
           await navigator.clipboard.writeText(clipText.value);
           alert('متن کپی شد');
-        }
-
-        async function copyCode() {
-          await navigator.clipboard.writeText(META.code);
-          alert('شناسه کپی شد');
         }
 
         async function copyLink() {
@@ -405,10 +309,12 @@ function viewPage(code, item) {
 
         async function shareLink() {
           const url = fullShareUrl();
+
           if (navigator.share) {
             await navigator.share({ title: document.title, url });
           } else {
-            await copyLink();
+            await navigator.clipboard.writeText(url);
+            alert('لینک کپی شد');
           }
         }
 
@@ -416,7 +322,7 @@ function viewPage(code, item) {
           const text = clipText.value.trim();
 
           if (!text) return alert('متنی برای ساخت QR وجود ندارد');
-          if (text.length > 1200) return alert('متن برای QR خیلی طولانی است. بهتر است لینک را کپی کنی.');
+          if (text.length > 1200) return alert('متن برای QR خیلی طولانی است.');
 
           document.getElementById('qrImage').src =
             'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(text);
@@ -430,24 +336,66 @@ function viewPage(code, item) {
           document.body.classList.remove('modal-open');
         }
 
-        async function deleteClip() {
-          if (!confirm('متن حذف شود؟')) return;
-
-          const password = prompt('اگر رمز دارد، وارد کن. اگر ندارد خالی بگذار.') || '';
-          const form = new FormData();
-          form.append('code', META.code);
-          form.append('password', password);
-
-          const res = await fetch('/delete', { method: 'POST', body: form });
-          document.open();
-          document.write(await res.text());
-          document.close();
-        }
-
         document.addEventListener('keydown', e => {
           if (e.key === 'Escape') closeQr();
         });
       </script>
+
+      ${sharedScripts()}
+    </main>
+  `;
+}
+
+async function adminPage(env) {
+  const list = await env.CLIPS.list({ limit: 1000 });
+  const rows = [];
+
+  for (const key of list.keys) {
+    const item = await getClip(env, key.name);
+    if (!item) continue;
+
+    rows.push(`
+      <tr>
+        <td><code>${e(key.name)}</code></td>
+        <td>${e((item.text || "").slice(0, 120))}</td>
+        <td>${item.passwordHash ? "دارد" : "ندارد"}</td>
+        <td>${item.expiresAt ? new Date(item.expiresAt).toLocaleString("fa-IR") : "دائمی"}</td>
+        <td>
+          <form method="POST" action="/admin/delete" onsubmit="return confirm('حذف شود؟')">
+            <input type="hidden" name="code" value="${e(key.name)}">
+            <button class="danger" type="submit">حذف</button>
+          </form>
+        </td>
+      </tr>
+    `);
+  }
+
+  return `
+    <main>
+      <section class="hero">
+        <div class="badge">Admin</div>
+        <h1>پنل مدیریت</h1>
+        <p class="hint">مشاهده و حذف همه متن‌های ذخیره‌شده.</p>
+      </section>
+
+      <section class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>شناسه</th>
+                <th>متن</th>
+                <th>رمز</th>
+                <th>انقضا</th>
+                <th>عملیات</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.length ? rows.join("") : `<tr><td colspan="5">موردی وجود ندارد.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </main>
   `;
 }
@@ -455,48 +403,18 @@ function viewPage(code, item) {
 function sharedScripts() {
   return `
     <script>
-      const form = document.getElementById('saveForm');
-      if (form) {
-        const textarea = form.querySelector('textarea');
-        if (textarea) {
-          updateTextDirection(textarea);
-          textarea.addEventListener('input', () => updateTextDirection(textarea));
-        }
-
-        form.addEventListener('submit', async e => {
-          const useEncryption = document.getElementById('useEncryption');
-          const encPass = document.getElementById('encryptionPassword');
-          const encrypted = document.getElementById('encrypted');
-          const textarea = form.querySelector('textarea[name="text"]');
-
-          if (useEncryption && useEncryption.checked) {
-            if (!encPass.value) {
-              e.preventDefault();
-              alert('رمز رمزنگاری را وارد کن');
-              return;
-            }
-
-            e.preventDefault();
-            textarea.value = await encryptText(textarea.value, encPass.value);
-            encrypted.value = '1';
-            form.submit();
-          }
-        });
-      }
-
       function updateTextDirection(el) {
+        if (!el) return;
         const value = el.value.trim();
         const hasPersian = /[\\u0600-\\u06FF]/.test(value);
         el.dir = hasPersian ? 'rtl' : 'ltr';
         el.style.textAlign = hasPersian ? 'right' : 'left';
       }
 
-      function saveHistory(code) {
-        const key = 'clip_history';
-        const list = JSON.parse(localStorage.getItem(key) || '[]');
-        const next = [code, ...list.filter(x => x !== code)].slice(0, 8);
-        localStorage.setItem(key, JSON.stringify(next));
-      }
+      document.querySelectorAll('textarea').forEach(el => {
+        updateTextDirection(el);
+        el.addEventListener('input', () => updateTextDirection(el));
+      });
 
       function startCountdown(expiresAt) {
         const el = document.getElementById('remain');
@@ -522,52 +440,6 @@ function sharedScripts() {
 
         tick();
       }
-
-      async function encryptText(text, password) {
-        const enc = new TextEncoder();
-        const salt = crypto.getRandomValues(new Uint8Array(16));
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const key = await deriveKey(password, salt);
-        const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(text));
-
-        return JSON.stringify({
-          alg: 'AES-GCM',
-          salt: b64(salt),
-          iv: b64(iv),
-          data: b64(new Uint8Array(encrypted))
-        });
-      }
-
-      async function decryptText(payload, password) {
-        const obj = JSON.parse(payload);
-        const salt = fromB64(obj.salt);
-        const iv = fromB64(obj.iv);
-        const data = fromB64(obj.data);
-        const key = await deriveKey(password, salt);
-        const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
-        return new TextDecoder().decode(decrypted);
-      }
-
-      async function deriveKey(password, salt) {
-        const enc = new TextEncoder();
-        const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
-
-        return crypto.subtle.deriveKey(
-          { name: 'PBKDF2', salt, iterations: 120000, hash: 'SHA-256' },
-          baseKey,
-          { name: 'AES-GCM', length: 256 },
-          false,
-          ['encrypt', 'decrypt']
-        );
-      }
-
-      function b64(bytes) {
-        return btoa(String.fromCharCode(...bytes));
-      }
-
-      function fromB64(str) {
-        return Uint8Array.from(atob(str), c => c.charCodeAt(0));
-      }
     </script>
   `;
 }
@@ -578,7 +450,6 @@ function page(env, title, body, status = 200) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <link rel="manifest" href="/manifest.webmanifest">
   <title>${e(title)}</title>
   <style>
     @font-face {
@@ -655,7 +526,7 @@ function page(env, title, body, status = 200) {
 
     p { margin: 0; line-height: 2; }
 
-    .hint, .muted {
+    .hint {
       color: #cbd5e1;
       font-size: 16px;
     }
@@ -721,15 +592,19 @@ function page(env, title, body, status = 200) {
       font-family: Vazirmatn, Tahoma, Arial, sans-serif;
     }
 
-    input:focus, textarea:focus, select:focus {
-      border-color: #60a5fa;
-      box-shadow: 0 0 0 3px rgba(96, 165, 250, .15);
-    }
-
     textarea {
       min-height: 340px;
       resize: vertical;
       line-height: 1.9;
+    }
+
+    textarea[readonly] {
+      cursor: default;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: #60a5fa;
+      box-shadow: 0 0 0 3px rgba(96, 165, 250, .15);
     }
 
     button, a {
@@ -790,28 +665,68 @@ function page(env, title, body, status = 200) {
 
     .row button { white-space: nowrap; }
 
-    .share-link {
+    .share-row {
       max-width: 560px;
       margin: 18px auto 0;
+      display: flex;
+      gap: 8px;
     }
 
-    .share-link input {
-      text-align: left;
+    .share-row input {
       direction: ltr;
+      text-align: left;
       font-size: 13px;
     }
 
-    .local-history {
-      margin-top: 24px;
+    .text-shell {
+      position: relative;
     }
 
-    .local-history h2 {
-      font-size: 17px;
+    .text-shell textarea {
+      padding-left: 56px;
     }
 
-    .local-history a {
-      margin: 6px 6px 0 0;
+    .side-icons {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
       background: #1e293b;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .icon-btn:hover {
+      background: #2563eb;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      direction: rtl;
+    }
+
+    th, td {
+      border-bottom: 1px solid #334155;
+      padding: 12px;
+      text-align: right;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
     }
 
     .modal[hidden] { display: none; }
@@ -909,29 +824,21 @@ function errorPage(message) {
   return `<main><section class="card"><h1>خطا</h1><p>${e(message)}</p><div class="actions"><a href="/">صفحه اصلی</a></div></section></main>`;
 }
 
-function successPage(message) {
-  return `<main><section class="card"><h1>انجام شد</h1><p>${e(message)}</p><div class="actions"><a href="/">صفحه اصلی</a></div></section></main>`;
-}
-
 async function getClip(env, code) {
   const raw = await env.CLIPS.get(code);
   if (!raw) return null;
 
   try {
     const parsed = JSON.parse(raw);
-    if (parsed?.v === 2) return parsed;
+    if (parsed?.v >= 3) return parsed;
   } catch {}
 
   return {
-    v: 2,
+    v: 3,
     text: raw,
     createdAt: Date.now(),
-    updatedAt: Date.now(),
     expiresAt: null,
     passwordHash: null,
-    readonly: false,
-    burnAfterRead: false,
-    encrypted: false
   };
 }
 
@@ -970,28 +877,34 @@ async function verifyPassword(password, hash) {
   return await sha256(password) === hash;
 }
 
+function checkAdmin(request, env) {
+  if (!env.ADMIN_PASSWORD) {
+    return {
+      ok: false,
+      response: page(env, "غیرفعال", errorPage("ADMIN_PASSWORD تنظیم نشده است."), 500)
+    };
+  }
+
+  const auth = request.headers.get("Authorization") || "";
+  const expected = "Basic " + btoa("admin:" + env.ADMIN_PASSWORD);
+
+  if (auth === expected) return { ok: true };
+
+  return {
+    ok: false,
+    response: new Response("Authentication required", {
+      status: 401,
+      headers: {
+        "WWW-Authenticate": 'Basic realm="Admin Panel"'
+      }
+    })
+  };
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json; charset=utf-8" }
-  });
-}
-
-function manifest(env) {
-  return json({
-    name: env.SITE_TITLE || "Pirdel Clipboard",
-    short_name: "Clipboard",
-    start_url: "/",
-    display: "standalone",
-    background_color: "#020617",
-    theme_color: "#2563eb",
-    icons: []
-  });
-}
-
-function serviceWorker() {
-  return new Response(`self.addEventListener('fetch', () => {});`, {
-    headers: { "content-type": "application/javascript; charset=utf-8" }
   });
 }
 
@@ -1003,4 +916,4 @@ function e(str) {
     '"': "&quot;",
     "'": "&#039;"
   }[m]));
-      }
+}
